@@ -121,22 +121,60 @@ exports.getOrderById = async (req, res) => {
   }
 };
 
-exports.cancelOrder = async (req, res) => {
+exports.editOrder = async (req, res) => {
+  const orderId = req.params.id;
+
   try {
-    const order = await Order.findByPk(req.params.id, {
-      include: [OrderItem],
+    const order = await Order.findByPk(orderId, {
+      include: [
+        { model: User, attributes: ['id', 'name', 'email'] },
+        {
+          model: OrderItem,
+          include: [{ model: Product, attributes: ['id', 'name', 'price'] }],
+        },
+      ],
     });
 
     if (!order) {
       return res.status(404).json({ error: 'Order not found' });
     }
 
+    order.status = req.body.status;
+    await order.save();
+
+    res.status(200).json({ message: 'Order Edited Successfully!' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to edit order' });
+  }
+};
+
+exports.cancelOrder = async (req, res) => {
+  const t = await sequelize.transaction();
+  try {
+    const order = await Order.findByPk(req.params.id, {
+      include: [OrderItem],
+      transaction: t,
+    });
+
+    if (!order) {
+      await t.rollback();
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
     if (req.user.isAdmin !== true && req.user.userId !== order.userId) {
+      await t.rollback();
       return res.status(403).json({ error: 'Unauthorized' });
     }
 
+    if (order.status === 'delivering') {
+      await t.rollback();
+      return res.status(400).json({
+        error: 'Order is already being delivered and cannot be cancelled.',
+      });
+    }
+
     // Restore stock
-    const t = await sequelize.transaction();
     for (const item of order.OrderItems) {
       const product = await Product.findByPk(item.productId, {
         transaction: t,
@@ -148,11 +186,15 @@ exports.cancelOrder = async (req, res) => {
     }
 
     await OrderItem.destroy({ where: { orderId: order.id }, transaction: t });
-    await Order.destroy({ where: { id: order.id }, transaction: t });
+
+    order.status = 'cancelled';
+    await order.save({ transaction: t });
+
     await t.commit();
 
     res.status(200).json({ message: 'Order cancelled and stock restored' });
   } catch (err) {
+    await t.rollback();
     console.error(err);
     res.status(500).json({ error: 'Failed to cancel order' });
   }

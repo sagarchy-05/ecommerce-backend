@@ -10,6 +10,7 @@ router.post('/', orderController.placeOrder);
 router.get('/all', isAdmin, orderController.getAllOrders);
 router.get('/', orderController.getMyOrders);
 router.get('/:id', orderController.getOrderById);
-router.delete('/:id', isAdmin, orderController.cancelOrder);
+router.put('/:id', isAdmin, orderController.editOrder);
+router.delete('/:id', orderController.cancelOrder);
 
 module.exports = router;
